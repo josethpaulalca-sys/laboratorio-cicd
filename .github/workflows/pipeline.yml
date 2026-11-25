@@ -1,0 +1,70 @@
+name: Pipeline CI-CD
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  integracion:
+    name: Integracion y pruebas con Docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v6
+
+      - name: Comprobar archivos
+        run: |
+          test -s index.html
+          test -s Dockerfile
+
+      - name: Construir imagen Docker
+        run: docker build -t laboratorio-cicd .
+
+      - name: Probar pagina en un contenedor
+        run: |
+          docker run -d --name prueba-web -p 8080:80 laboratorio-cicd
+          trap 'docker rm -f prueba-web' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 \
+            http://localhost:8080/ -o respuesta.html
+          cmp index.html respuesta.html
+          echo "Prueba correcta: el servidor entrega nuestra pagina"
+
+      - name: Preparar pagina para publicar
+        run: |
+          mkdir -p sitio
+          cp index.html sitio/
+
+      - name: Guardar pagina verificada
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: sitio
+
+  despliegue:
+    name: Publicacion automatica
+    needs: integracion
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.publicacion.outputs.page_url }}
+
+    steps:
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Publicar pagina
+        id: publicacion
+        uses: actions/deploy-pages@v4
